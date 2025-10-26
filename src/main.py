@@ -1,20 +1,85 @@
-from src.power import power_function
-from src.constants import SAMPLE_CONSTANT
+from src.config import LOGGING_CONFIG
+
+import logging.config
+import sys
+from pathlib import Path
+
+import typer
+from typer import Typer, Context
+
+from src.container import Container
+from src.enums import FileReadMode
+from src.services.windows_console import WindowsConsoleService
+
+app = Typer()
 
 
-def main() -> None:
+def get_container(ctx: Context) -> Container:
+    container = ctx.obj
+    if not isinstance(container, Container):
+        raise RuntimeError("DI container is not initialized")
+    return container
+
+
+@app.callback()
+def main(ctx: Context):
+    logging.config.dictConfig(LOGGING_CONFIG)
+    logger = logging.getLogger(__name__)
+    ctx.obj = Container(
+        console_service=WindowsConsoleService(logger=logger),
+    )
+
+
+@app.command()
+def ls(
+    ctx: Context,
+    path: Path = typer.Argument(
+        ..., exists=False, readable=False, help="File to print"
+    ),
+) -> None:
     """
-    Обязательнная составляющая программ, которые сдаются. Является точкой входа в приложение
-    :return: Данная функция ничего не возвращает
+    List all files in a directory.
+    :param ctx:   typer context object for imitating di container
+    :param path:  path to directory to list
+    :return: content of directory
     """
+    try:
+        container: Container = get_container(ctx)
+        content = container.console_service.ls(path)
+        sys.stdout.writelines(content)
+    except OSError as e:
+        typer.echo(e)
 
-    target, degree = map(int, input("Введите два числа разделенные пробелом: ").split(" "))
 
-    result = power_function(target=target, power=degree)
+@app.command()
+def cat(
+    ctx: Context,
+    filename: Path = typer.Argument(
+        ..., exists=False, readable=False, help="File to print"
+    ),
+    mode: bool = typer.Option(False, "--bytes", "-b", help="Read as bytes"),
+):
+    """
+    Cat a file
+    :param ctx: typer context object for imitating di container
+    :param filename: Filename to cat
+    :param mode: Mode to read the file in
+    :return:
+    """
+    try:
+        container: Container = get_container(ctx)
+        file_mode = FileReadMode.bytes if mode else FileReadMode.string
+        data = container.console_service.cat(
+            filename,
+            mode=file_mode,
+        )
+        if isinstance(data, bytes):
+            sys.stdout.buffer.write(data)
+        else:
+            sys.stdout.write(data)
+    except OSError as e:
+        typer.echo(e)
 
-    print(result)
-
-    print(SAMPLE_CONSTANT)
 
 if __name__ == "__main__":
-    main()
+    app()
