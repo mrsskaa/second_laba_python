@@ -1,0 +1,2 @@
+class NotInitContainer(Exception):
+    pass
