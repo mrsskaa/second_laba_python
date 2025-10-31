@@ -361,7 +361,7 @@ class WindowsConsoleService(OSConsoleServiceBase):
 
     def cp(self, src: PathLike[str] | str, dst: PathLike[str] | str, recursive: bool = False) -> None:
         """
-        Копирование файла или каталога.
+        К6опирование файла или каталога.
 
         Поддерживает копирование в существующий каталог и рекурсивное копирование каталогов.
         """
