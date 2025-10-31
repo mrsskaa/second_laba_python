@@ -55,9 +55,9 @@ class WindowsConsoleService(OSConsoleServiceBase):
     def ls(self, path: PathLike[str] | str, mode: FileDisplayMode = FileDisplayMode.simple) -> list[str]:
         """
         Функция отображает содержимое директории и обрабатывает возможные ошибки
-        :param path: Путь к директории для отображения
-        :param mode: Режим отображения (простой или подробный)
-        :return: Список строк с информацией о файлах и директориях
+        :param path: путь к директории для отображения
+        :param mode: режим отображения (простой или подробный)
+        :return: список строк с информацией о файлах и директориях
         """
         if hasattr(path, 'value'):
             path = path.value
@@ -166,10 +166,10 @@ class WindowsConsoleService(OSConsoleServiceBase):
     def cp(self, path1: PathLike[str] | str, path2: PathLike[str] | str, recursive: bool = False) -> None:
         """
         Функция копирует файл или каталог и обрабатывает возможные ошибки
-        :param path1:
-        :param path2:
-        :param recursive:
-        :return:
+        :param path1: путь к исходному файлу или каталогу
+        :param path2: путь к месту назначения
+        :param recursive: True/False (рекурсивно копировать каталоги/нет)
+        :return: функция ничего не возвращает
         """
         src_path = Path(path1)
         dst_path = Path(path2)
@@ -234,9 +234,9 @@ class WindowsConsoleService(OSConsoleServiceBase):
     def mv(self, path1: PathLike[str] | str, path2: PathLike[str] | str) -> None:
         """
         Функция перемещает/переименовывает файл или каталог и обрабатывает возможные ошибки
-        :param path1:
-        :param path2:
-        :return:
+        :param path1: источник (файл или каталог)
+        :param path2: назначение (файл, каталог или новое имя)
+        :return: функция ничего не возвращает
         """
         src_path = Path(path1)
         dst_path = Path(path2)
@@ -272,9 +272,9 @@ class WindowsConsoleService(OSConsoleServiceBase):
     def rm(self, path_file: PathLike[str] | str, r: bool = False) -> None:
         """
         Функция удаляет файл или каталог и обрабатывает возможные ошибки
-        :param path_file:
-        :param r:
-        :return:
+        :param path_file: путь к удаляемому файлу или каталогу
+        :param r: True/False (рекурсивное удаление каталога/нет)
+        :return: функция ничего не возвращает
         """
         path = Path(path_file)
         self._logger.info(f"rm: target='{path}', recursive={r}")
@@ -322,8 +322,8 @@ class WindowsConsoleService(OSConsoleServiceBase):
     def zip(self, path: PathLike[str] | str, path_arch: PathLike[str] | str) -> None:
         """
         Функция создаёт zip‑архив из указанного каталога средствами стандартной библиотеки и обрабатывает возможные ошибки
-        :param path: путь к каталогу‑источнику для упаковки
-        :param path_arch: путь к итоговому ZIP‑файлу
+        :param path: путь к каталогу (источнику) для упаковки
+        :param path_arch: путь к итоговому zip‑файлу
         :return: функция ничего не возвращает
         """
         src_dir = Path(path)
@@ -359,7 +359,7 @@ class WindowsConsoleService(OSConsoleServiceBase):
         """
         Функция распаковывает zip‑архив в указанную директорию и обрабатывает возможные ошибки
         :param path_arch: путь к zip‑архиву
-        :param res: папка назначения
+        :param res: папка назначения; если None — используется текущая рабочая директория
         :return: функция ничего не возвращает
         """
         src_zip = Path(path_arch)
@@ -389,10 +389,10 @@ class WindowsConsoleService(OSConsoleServiceBase):
 
     def tar_dir(self, path_file: PathLike[str] | str, path_arch: PathLike[str] | str) -> None:
         """
-        Функция Создаёт tar.gz архив из указанного каталога с помощью tarfile и обрабатывает возможные ошибки
+        Функция создаёт tar.gz архив из указанного каталога с помощью tarfile и обрабатывает возможные ошибки
         :param path_file: путь к каталогу‑источнику для упаковки
-        :param path_arch: путь к результирующему tar.gz архиву
-        :return: Функция ничего не возвращает
+        :param path_arch: путь к результирующему tar.gz архиву (может быть относительным или абсолютным)
+        :return: функция ничего не возвращает
         """
 
         src_dir = Path(path_file)
@@ -422,7 +422,7 @@ class WindowsConsoleService(OSConsoleServiceBase):
         """
         Функция распаковывает tar.gz архив в указанную директорию и обрабатывает ошибки
         :param path_archive_tar_gz: путь к tar.gz архиву
-        :param res: папка назначения
+        :param res: папка назначения; если None — используется текущая рабочая директория
         :return: функция ничего не возвращает
         """
         src_tar = Path(path_archive_tar_gz)
@@ -450,9 +450,9 @@ class WindowsConsoleService(OSConsoleServiceBase):
         Функция совершает поиск строк по регулярному выражению в файлах и обрабатывает возможные ошибки
         :param pattern: регулярное выражение для поиска
         :param path: файл или каталог, в котором будет производиться поиск
-        :param r: True/False (рекурсивный обход подкаталогов/нет)
+        :param r: True/False (рекурсивный обход подкаталогов, если указан каталог/нет)
         :param ignore_case: True/False (поиск без учёта регистра/нет)
-        :return: функция ничего не возвращаает
+        :return: список строк с найденными совпадениями
         """
         logger = self._logger
         flags: re.RegexFlag
