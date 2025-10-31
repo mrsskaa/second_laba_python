@@ -1,2 +1,0 @@
-{"cmd": "cp", "src": "pyproject.toml", "dst": "tests\\h_copy.toml", "recursive": false, "timestamp": "2025-10-30T19:13:06"}
-{"cmd": "mv", "src": "tests\\h_copy.toml", "dst": "tests\\h_copy_moved.toml", "timestamp": "2025-10-30T19:13:25"}

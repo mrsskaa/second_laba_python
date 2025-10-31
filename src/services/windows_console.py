@@ -1,445 +1,252 @@
-# Импорт класса Logger для работы с логированием
 from logging import Logger
-# Импорт типов PathLike и функции stat из модуля os
 from os import PathLike
-# Импорт класса Path для работы с путями файловой системы
 from pathlib import Path
 import shutil
-# Импорт модуля stat с псевдонимом для работы с правами доступа
 import stat as stat_module
-# Импорт класса datetime для работы с датами и временем
 from datetime import datetime
-
-# Импорт перечислений для режимов чтения файлов и отображения
+import zipfile  # Стандартная библиотека для работы с ZIP архивами
+import tarfile  # Стандартная библиотека для работы с TAR/TAR.GZ архивами
+import re  # Для реализации grep
 from src.enums import FileReadMode, FileDisplayMode
-# Импорт базового класса для сервисов консоли
 from src.services.base import OSConsoleServiceBase
-
+import os
 
 class WindowsConsoleService(OSConsoleServiceBase):
-    """
-    Сервис для работы с консолью в операционной системе Windows.
-    Реализует методы для отображения содержимого директорий и файлов.
-    """
-
-    def __init__(self, logger: Logger):
+    def __init__(self, logger: Logger) -> None:
         """
-        Инициализация сервиса консоли Windows.
-
-        :param logger: Логгер для записи информации о работе сервиса
+        Функция инициализирует сервис консоли
+        :param logger: логгер для записи информации о работе сервиса
+        :return: функция ничего не возвращает
         """
-        # Сохраняем логгер для использования в методах класса
         self._logger = logger
 
 
     def format_detailed(self, entry: Path) -> str:
         """
-        Вспомогательный метод для форматирования подробной информации о файле или директории.
-        Создает строку с информацией о типе, правах доступа, размере, дате изменения и имени.
-
-        :param entry: Объект Path, представляющий файл или директорию
-        :return: Отформатированная строка с подробной информацией
+        Функция форматирует подробную информацию о файле или директории и обрабатывает возможные ошибки
+        :param entry: объект Path, представляющий файл или директорию
+        :return: отформатированная строка с подробной информацией
         """
         try:
-            # Получаем статистическую информацию о файле/директории
             stat_info = entry.stat()
 
-            # Получаем права доступа в числовом формате (octal)
             mode = oct(stat_module.S_IMODE(stat_info.st_mode))[2:]
             permissions = mode
 
-            # Получаем размер файла в байтах
             size = stat_info.st_size
 
-            # Получаем время последнего изменения и форматируем его
             mtime = datetime.fromtimestamp(stat_info.st_mtime)
             mtime_pretty = mtime.strftime("%Y-%m-%d %H:%M:%S")
 
-            # Определяем тип элемента: 'd' для директории, '-' для файла
             if entry.is_dir():
                 entry_type = "d"
             else:
                 entry_type = "-"
-            # Форматируем строку с выравниванием размера по правому краю
-            formatted_line = f"{entry_type}{permissions} {size:>10} {mtime_pretty} {entry.name}\n"
 
-            # Возвращаем отформатированную строку
-            return formatted_line
+            form_l = f"{entry_type}{permissions} {size:>10} {mtime_pretty} {entry.name}\n"
+
+            return form_l
 
         except OSError as e:
-            # Логируем предупреждение о невозможности получить детальную информацию
-            self._logger.warning(f"Could not get detailed info for {entry}: {e}")
-            # Возвращаем строку с заглушками для недоступной информации
-            return f"? ? ? ? {entry.name}\n"
+            self._logger.warning(f"Невозможно получить подробную информацию о {entry}: {e}")
+            return f"- --------- {0:>10} 1970-01-01 00:00:00 {entry.name}\n"
 
-    def ls(self, path: PathLike[str] | str, display_mode: FileDisplayMode = FileDisplayMode.simple) -> list[str]:
+
+    def ls(self, path: PathLike[str] | str, mode: FileDisplayMode = FileDisplayMode.simple) -> list[str]:
         """
-        Метод для отображения содержимого директории.
-        Поддерживает простой и подробный режимы отображения.
-
+        Функция отображает содержимое директории и обрабатывает возможные ошибки
         :param path: Путь к директории для отображения
-        :param display_mode: Режим отображения (простой или подробный)
+        :param mode: Режим отображения (простой или подробный)
         :return: Список строк с информацией о файлах и директориях
-        :raises FileNotFoundError: Если директория не найдена
-        :raises NotADirectoryError: Если указанный путь не является директорией
         """
-        # Преобразуем путь в объект Path для удобной работы
-        # Исправление для поддержки Typer ArgumentInfo
         if hasattr(path, 'value'):
             path = path.value
         path = Path(path)
-        # Проверяем существование пути
+
         if not path.exists():
-            # Логируем ошибку о том, что директория не найдена
-            self._logger.error(f"Folder not found: {path}")
-            # Выбрасываем исключение FileNotFoundError
+            self._logger.error(f"Директория не найдена: {path}")
             raise FileNotFoundError(path)
-        # Проверяем, что путь является директорией
+
         if not path.is_dir():
-            # Логируем ошибку о том, что путь не является директорией
-            self._logger.error(f"You entered {path} is not a directory")
-            # Выбрасываем исключение NotADirectoryError
+            self._logger.error(f"Введенное {path} не является директорией")
             raise NotADirectoryError(path)
 
-        # Логируем информацию о начале отображения директории
-        self._logger.info(f"Listing {path} in {display_mode} mode")
+        self._logger.info(f"Отображение {path} в режиме {mode}")
 
-        # Получаем список всех элементов в директории
-        entries = list(path.iterdir())
-        # Сортируем элементы: сначала директории, потом файлы, в алфавитном порядке
-        entries.sort(key=lambda x: (x.is_file(), x.name.lower()))
+        a = list(path.iterdir())
 
-        # Проверяем режим отображения
-        if display_mode == FileDisplayMode.simple:
-            # Возвращаем простой список имен файлов с переносами строк
-            return [entry.name + "\n" for entry in entries]
+        result: list[str] = []
+        if mode == FileDisplayMode.simple:
+            for i in a:
+                result.append(i.name + "\n")
         else:
-            # Возвращаем подробную информацию о каждом элементе
-            return [self.format_detailed(entry) for entry in entries]
+            for i in a:
+                formatted = self.format_detailed(i)
+                if formatted:
+                    result.append(formatted)
+        return result
 
 
-
-
-    def cat(self, file: PathLike[str] | str, mode: FileReadMode = FileReadMode.string)->str | bytes:
+    def cat(self, path_file: PathLike[str] | str, mode: FileReadMode = FileReadMode.string)->str | bytes:
         """
-        Метод для чтения и отображения содержимого файла.
-
-        ЧТО ДЕЛАЕТ:
-        - Читает содержимое файла и возвращает его
-        - Поддерживает текстовый и бинарный режимы чтения
-        - Работает с относительными и абсолютными путями
-        - Логирует все операции и ошибки в файл shell.log
-
-        ТРЕБОВАНИЯ:
-        - Запрещено использовать subprocess и системные команды
-        - Все операции выполняются через Python API (pathlib)
-        - Проверяет, что путь существует
-        - Проверяет, что путь указывает на файл (не директорию)
-        - Подробное логирование всех операций
-
-        :param file: Путь к файлу для чтения (может быть относительным или абсолютным)
-        :param mode: Режим чтения файла (FileReadMode.string или FileReadMode.bytes)
-        :return: Содержимое файла в виде строки или байтов
-        :raises FileNotFoundError: Если файл не найден
-        :raises IsADirectoryError: Если указанный путь является директорией
-        :raises OSError: При ошибках чтения файла
+        Функция для читает и отображает содержимое файла и обрабатывает возможные ошибки
+        :param path_file: путь к файлу
+        :param mode: режим чтения файла (FileReadMode.string или FileReadMode.bytes)
+        :return: содержимое файла в виде строки или байтов
         """
-        # ============================================
-        # ШАГ 1: Преобразование пути в объект Path
-        # ============================================
-        # Path() - универсальный способ работы с путями в Python
-        # Автоматически обрабатывает относительные и абсолютные пути
-        # Пример: "file.txt", "./file.txt", "C:/Users/file.txt"
-        path = Path(file)
+        path = Path(path_file)
+        self._logger.info(f"cat: Запуск чтения файла '{path_file}' в режиме {mode}")
 
-        # Логируем начало операции чтения файла
-        # INFO - уровень для информационных сообщений
-        self._logger.info(f"cat: Starting to read file '{file}' in mode {mode}")
+        if not path.exists():
+            err = f"cat: Файл не найден: '{path_file}' (path does not exist)"
+            self._logger.error(err)
+            raise FileNotFoundError(err)
 
-        # ============================================
-        # ШАГ 2: Проверка существования файла
-        # ============================================
-        # path.exists() - проверяет существование файла/папки
-        # follow_symlinks=True - следует по символическим ссылкам
-        # Если файл не существует, создаем ошибку
-        if not path.exists(follow_symlinks=True):
-            # Логируем ошибку с уровнем ERROR
-            # Это серьезная ошибка - файл не найден
-            error_msg = f"cat: File not found: '{file}' (path does not exist)"
-            self._logger.error(error_msg)
+        if path.is_dir():
+            err = f"cat: Путь - это директория, а не файл: '{path_file}'"
+            self._logger.error(err)
+            raise IsADirectoryError(err)
 
-            # Выбрасываем исключение FileNotFoundError
-            # Это стандартное исключение Python для отсутствующих файлов
-            raise FileNotFoundError(error_msg)
-
-        # ============================================
-        # ШАГ 3: Проверка, что это файл, а не папка
-        # ============================================
-        # path.is_dir() - проверяет, является ли путь директорией
-        # Если это директория, мы не можем прочитать ее содержимое через cat
-        if path.is_dir(follow_symlinks=True):
-            # Логируем ошибку: передана директория вместо файла
-            error_msg = f"cat: Path is a directory, not a file: '{file}'"
-            self._logger.error(error_msg)
-
-            # Выбрасываем исключение IsADirectoryError
-            # Это специальное исключение для случая "ожидали файл, получили папку"
-            raise IsADirectoryError(error_msg)
-
-        # ============================================
-        # ШАГ 4: Чтение файла
-        # ============================================
-        # Используем try-except для обработки возможных ошибок чтения
-        # Могут быть ошибки: нет прав на чтение, файл используется другой программой и т.д.
         try:
-            # Проверяем режим чтения файла
             if mode == FileReadMode.string:
-                # ==========================================
-                # Режим чтения как ТЕКСТ
-                # ==========================================
-                # path.read_text() - читает файл как текст (строку)
-                # encoding="utf-8" - используем кодировку UTF-8 (поддерживает русские буквы)
-                # Это метод Python API - НЕ используем subprocess!
-
-                self._logger.debug(f"cat: Reading file '{file}' as text (UTF-8)")
+                self._logger.debug(f"cat: Чтение файла '{path_file}' в виде текста")
                 file_content = path.read_text(encoding="utf-8")
-
-                # Логируем успешное чтение
-                self._logger.info(f"cat: Successfully read file '{file}' as text ({len(file_content)} characters)")
-
-                # Возвращаем содержимое файла
+                self._logger.info(f"cat: Успешное чтение '{path_file}' в виде текста, ({len(file_content)} символов)")
                 return file_content
 
-            elif mode == FileReadMode.bytes:
-                # ==========================================
-                # Режим чтения как БАЙТЫ
-                # ==========================================
-                # path.read_bytes() - читает файл как бинарные данные
-                # Это нужно для изображений, исполняемых файлов и т.д.
-                # Это метод Python API - НЕ используем subprocess!
-
-                self._logger.debug(f"cat: Reading file '{file}' as bytes")
+            if mode == FileReadMode.bytes:
+                self._logger.debug(f"cat: Чтение файла '{path_file}' в виде байтов")
                 content_bytes = path.read_bytes()
-
-                # Логируем успешное чтение
-                self._logger.info(f"cat: Successfully read file '{file}' as bytes ({len(content_bytes)} bytes)")
-
-                # Возвращаем содержимое файла
+                self._logger.info(f"cat: Успешное чтение файла '{path_file}' в виде байтов, ({len(content_bytes)} байт)")
                 return content_bytes
 
-            else:
-                # Невозможная ситуация - неизвестный режим чтения
-                error_msg = f"cat: Unknown read mode: {mode}"
-                self._logger.error(error_msg)
-                raise ValueError(error_msg)
-
         except OSError as e:
-            # ==========================================
-            # Обработка ошибок при чтении файла
-            # ==========================================
-            # OSError - общий класс для ошибок операционной системы
-            # Может быть: нет прав, файл занят, поврежден и т.д.
-
-            # self._logger.exception() - логирует полную информацию об ошибке
-            # Включает: сообщение об ошибке, стек вызовов (traceback)
-            # Это помогает отладить проблему
-            self._logger.exception(f"cat: Error reading file '{file}': {e}")
-
-            # Перебрасываем исключение выше, чтобы обработать его в main.py
+            self._logger.exception(f"cat: Ошибка чтения файла '{path_file}': {e}")
             raise
+
 
     def cd(self, path: PathLike[str] | str) -> str:
         """
-        Метод для перехода в указанный каталог (смена рабочей директории).
-
-        ЧТО ДЕЛАЕТ:
-        - Переходит в указанную директорию
-        - Поддерживает специальные пути: . , .. , ~
-        - Возвращает абсолютный путь к новой директории
-
-        ТРЕБОВАНИЯ:
-        - Запрещено использовать subprocess и системные команды
-        - Все операции через Python API (pathlib, os)
-        - Поддерживает относительные и абсолютные пути
-        - Подробное логирование всех операций
-
-        :param path: Путь к директории для перехода
-                     . - текущая директория
-                     .. - родительская директория (на уровень выше)
-                     ~ - домашняя директория пользователя
-        :return: Абсолютный путь к новой рабочей директории
-        :raises FileNotFoundError: Если директория не существует
-        :raises NotADirectoryError: Если путь не является директорией
+        Функция меняет рабочую директорию и обрабатывает возможные ошибки
+        :param path: путь к директории
+        :return: абсолютный путь к новой рабочей директории
         """
-        # Импортируем os для получения домашней директории и смены рабочей директории
-        import os
-
-        # ============================================
-        # ШАГ 1: Получение текущей рабочей директории
-        # ============================================
-        # os.getcwd() - возвращает текущую рабочую директорию процесса
-        # Это абсолютный путь к папке, где запущен Python
         current_dir = Path(os.getcwd())
+        self._logger.info(f"cd:Попытка изменить каталог на '{path}'")
+        path = str(path)
 
-        # Логируем начало операции смены директории
-        self._logger.info(f"cd: Attempting to change directory to '{path}'")
+        if path == "~" or path.startswith("~/"):
+            path_str =os.path.expanduser(path)
+            self._logger.debug(f"cd: Путь преобразован до '{path_str}'")
 
-        # ============================================
-        # ШАГ 2: Обработка специальных путей
-        # ============================================
+        path = Path(path)
 
-        # Преобразуем путь в строку для удобства обработки
-        path_str = str(path)
+        if not path.is_absolute():
+            path = current_dir/path
+            self._logger.debug(f"cd: Относительный путь преобразован в абсолютный:   '{path}'")
 
-        # Обработка тильды ~ (домашняя директория)
-        if path_str == "~" or path_str.startswith("~/"):
-            # os.path.expanduser() - преобразует ~ в путь к домашней директории
-            # На Windows: C:\Users\Username
-            # На Linux/Mac: /home/username
-            path_str = os.path.expanduser(path_str)
-            self._logger.debug(f"cd: Expanded ~ to '{path_str}'")
+        path = path.resolve()
+        self._logger.debug(f"cd: Расширенный путь  '{path}'")
 
-        # Преобразуем строку пути в объект Path
-        target_path = Path(path_str)
+        if not path.exists():
+            err = f"cd: Директория не найдена: '{path}'"
+            self._logger.error(err)
+            raise FileNotFoundError(err)
 
-        # ============================================
-        # ШАГ 3: Обработка относительных путей
-        # ============================================
+        if not path.is_dir():
+            err = f"cd: Путь не является директорией: '{path}'"
+            self._logger.error(err)
+            raise NotADirectoryError(err)
 
-        # Проверяем, является ли путь относительным (не начинается с / или C:\ на Windows)
-        if not target_path.is_absolute():
-            # Для относительного пути используем текущую директорию как базовую
-            # Path / Path - операция объединения путей
-            target_path = current_dir / target_path
-            self._logger.debug(f"cd: Converted relative path to absolute: '{target_path}'")
+        os.chdir(path)
+        self._logger.info(f"cd: Успешная смена директории на '{path}' (из '{current_dir}')")
+        return str(path)
 
-        # ============================================
-        # ШАГ 4: Получение абсолютного пути и разрешение символических ссылок
-        # ============================================
-        # target_path.resolve() - преобразует путь в абсолютный и разрешает символические ссылки
-        # .. - преобразуется в родительскую директорию
-        # . - преобразуется в текущую директорию
-        target_path = target_path.resolve()
-        self._logger.debug(f"cd: Resolved path to '{target_path}'")
 
-        # ============================================
-        # ШАГ 5: Проверка существования директории
-        # ============================================
-        if not target_path.exists():
-            # Логируем ошибку: директория не существует
-            error_msg = f"cd: Directory not found: '{path}' (resolved to '{target_path}')"
-            self._logger.error(error_msg)
-
-            # Выбрасываем исключение FileNotFoundError
-            raise FileNotFoundError(error_msg)
-
-        # ============================================
-        # ШАГ 6: Проверка, что путь является директорией
-        # ============================================
-        if not target_path.is_dir():
-            # Логируем ошибку: путь не является директорией
-            error_msg = f"cd: Path is not a directory: '{path}' (resolved to '{target_path}')"
-            self._logger.error(error_msg)
-
-            # Выбрасываем исключение NotADirectoryError
-            raise NotADirectoryError(error_msg)
-
-        # ============================================
-        # ШАГ 7: Смена рабочей директории
-        # ============================================
-        # os.chdir() - меняет текущую рабочую директорию процесса
-        # После этого все относительные пути будут идти от этой директории
-        os.chdir(target_path)
-
-        # Получаем подтверждение новой директории
-
-        # Логируем успешную смену директории
-        self._logger.info(f"cd: Successfully changed directory to '{target_path}' (from '{current_dir}')")
-
-        # Возвращаем новый абсолютный путь
-        return str(target_path)
-
-    def cp(self, src: PathLike[str] | str, dst: PathLike[str] | str, recursive: bool = False) -> None:
+    def cp(self, path1: PathLike[str] | str, path2: PathLike[str] | str, recursive: bool = False) -> None:
         """
-        К6опирование файла или каталога.
-
-        Поддерживает копирование в существующий каталог и рекурсивное копирование каталогов.
+        Функция копирует файл или каталог и обрабатывает возможные ошибки
+        :param path1:
+        :param path2:
+        :param recursive:
+        :return:
         """
-        src_path = Path(src)
-        dst_path = Path(dst)
+        src_path = Path(path1)
+        dst_path = Path(path2)
 
         self._logger.info(f"cp: src='{src_path}', dst='{dst_path}', recursive={recursive}")
 
         if not src_path.exists():
-            error_msg = f"cp: Source not found: '{src_path}'"
-            self._logger.error(error_msg)
-            raise FileNotFoundError(error_msg)
+            err = f"cp: Источник не найден: '{src_path}'"
+            self._logger.error(err)
+            raise FileNotFoundError(err)
 
         try:
             if src_path.is_dir():
                 if not recursive:
-                    error_msg = f"cp: '{src_path}' is a directory; use -r for recursive copy"
-                    self._logger.error(error_msg)
-                    raise IsADirectoryError(error_msg)
+                    err = f"cp: '{src_path}' это директория; используйте -r для рекурсивного копирования"
+                    self._logger.error(err)
+                    raise IsADirectoryError(err)
 
-                # Определяем конечный путь каталога
                 if dst_path.exists() and dst_path.is_dir():
                     final_dst = dst_path / src_path.name
+
                 else:
                     final_dst = dst_path
 
-                self._logger.debug(f"cp: copytree from '{src_path}' to '{final_dst}'")
+                self._logger.debug(f"cp: Копируем из '{src_path}' в '{final_dst}'")
                 if final_dst.exists():
-                    # Поведение как у cp -r: нельзя копировать в уже существующую директорию одноименно
-                    # Упростим: если существует, то копируем внутрь (на уровень выше обработано),
-                    # иначе бросаем исключение
                     if final_dst.is_dir():
-                        # Копирование содержимого каталога внутрь существующей папки назначения
-                        for child in src_path.iterdir():
-                            target_child = final_dst / child.name
-                            if child.is_dir():
-                                shutil.copytree(child, target_child)
+                        for i in src_path.iterdir():
+                            target = final_dst /i.name
+                            if i.is_dir():
+                                shutil.copytree(i, target)
                             else:
-                                shutil.copy2(child, target_child)
+                                shutil.copy2(i, target)
                     else:
-                        raise FileExistsError(f"cp: Destination exists and is not a directory: '{final_dst}'")
+                        raise FileExistsError(f"cp: Пункт назначения существует и не является каталогом: '{final_dst}'")
                 else:
                     shutil.copytree(src_path, final_dst)
             else:
-                # Копирование файла
+
                 if dst_path.exists() and dst_path.is_dir():
                     final_dst = dst_path / src_path.name
                 else:
                     final_dst = dst_path
 
-                self._logger.debug(f"cp: copy2 from '{src_path}' to '{final_dst}'")
-                # Создаем родительские директории, если нужно
+                self._logger.debug(f"cp: copy2 из '{src_path}' в '{final_dst}'")
                 final_dst_parent = final_dst.parent
+
                 if not final_dst_parent.exists():
                     final_dst_parent.mkdir(parents=True, exist_ok=True)
+
                 shutil.copy2(src_path, final_dst)
 
-            self._logger.info(f"cp: Completed copy to '{dst_path}'")
+            self._logger.info(f"cp: Успешная копия '{dst_path}'")
+
         except PermissionError as e:
-            self._logger.exception(f"cp: Permission denied while copying '{src_path}' -> '{dst_path}': {e}")
+            self._logger.exception(f"cp: Отказано в разрешении на копирование '{src_path}' -> '{dst_path}': {e}")
             raise
         except OSError as e:
-            self._logger.exception(f"cp: OS error while copying '{src_path}' -> '{dst_path}': {e}")
+            self._logger.exception(f"cp: Ошибка операционной системы при копировании '{src_path}' -> '{dst_path}': {e}")
             raise
 
-    def mv(self, src: PathLike[str] | str, dst: PathLike[str] | str) -> None:
+    def mv(self, path1: PathLike[str] | str, path2: PathLike[str] | str) -> None:
         """
-        Перемещение/переименование файла или каталога. Поддерживает перемещение в существующий каталог.
+        Функция перемещает/переименовывает файл или каталог и обрабатывает возможные ошибки
+        :param path1:
+        :param path2:
+        :return:
         """
-        src_path = Path(src)
-        dst_path = Path(dst)
+        src_path = Path(path1)
+        dst_path = Path(path2)
 
         self._logger.info(f"mv: src='{src_path}', dst='{dst_path}'")
 
         if not src_path.exists():
-            error_msg = f"mv: Source not found: '{src_path}'"
-            self._logger.error(error_msg)
-            raise FileNotFoundError(error_msg)
+            err = f"mv: Источник не найден: '{src_path}'"
+            self._logger.error(err)
+            raise FileNotFoundError(err)
 
         try:
             final_dst: Path
@@ -448,63 +255,239 @@ class WindowsConsoleService(OSConsoleServiceBase):
             else:
                 final_dst = dst_path
 
-            self._logger.debug(f"mv: moving '{src_path}' to '{final_dst}'")
-            # Создаем родительские директории для назначения при необходимости
+            self._logger.debug(f"mv: Перемещение из '{src_path}' в '{final_dst}'")
+
             final_dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.move(str(src_path), str(final_dst))
-            self._logger.info(f"mv: Completed move to '{final_dst}'")
+            self._logger.info(f"mv: Успешное перемещение в '{final_dst}'")
+
         except PermissionError as e:
-            self._logger.exception(f"mv: Permission denied while moving '{src_path}' -> '{dst_path}': {e}")
+            self._logger.exception(f"mv:Запрещено перемещение'{src_path}' -> '{dst_path}': {e}")
             raise
+
         except OSError as e:
-            self._logger.exception(f"mv: OS error while moving '{src_path}' -> '{dst_path}': {e}")
+            self._logger.exception(f"mv: Ошибка операционной системы во время перемещения '{src_path}' -> '{dst_path}': {e}")
             raise
 
-    def rm(self, target: PathLike[str] | str, recursive: bool = False) -> None:
+    def rm(self, path_file: PathLike[str] | str, r: bool = False) -> None:
         """
-        Удаление файла или каталога. Для каталогов требуется recursive=True.
-        Ограничения: нельзя удалять корень диска и путь '..'.
+        Функция удаляет файл или каталог и обрабатывает возможные ошибки
+        :param path_file:
+        :param r:
+        :return:
         """
-        path = Path(target)
-        self._logger.info(f"rm: target='{path}', recursive={recursive}")
+        path = Path(path_file)
+        self._logger.info(f"rm: target='{path}', recursive={r}")
 
-        # Запрещаем '..' явно
-        path_str = str(target).strip()
+        path_str = str(path_file).strip()
         if path_str in {"..", "/"}:
-            error_msg = "rm: Deleting '..' or '/' is forbidden"
-            self._logger.error(error_msg)
-            raise PermissionError(error_msg)
+            err = "rm: Удаление '..' или '/' запрещено"
+            self._logger.error(err)
+            raise PermissionError(err)
 
-        # Разрешаем и нормализуем путь
-        resolved = path.resolve()
+        res = path.resolve()
 
-        # Защита от удаления корня диска (C:\, D:\ и т.д.)
-        if resolved == Path(resolved.anchor):
-            error_msg = f"rm: Deleting root is forbidden: '{resolved}'"
-            self._logger.error(error_msg)
-            raise PermissionError(error_msg)
+        if res == Path(res.anchor):
+            err = f"rm: Удаление корня запрещено: '{res}'"
+            self._logger.error(err)
+            raise PermissionError(err)
 
-        if not resolved.exists():
-            error_msg = f"rm: Path not found: '{path}'"
-            self._logger.error(error_msg)
-            raise FileNotFoundError(error_msg)
+        if not res.exists():
+            err = f"rm: Путь не найден: '{path}'"
+            self._logger.error(err)
+            raise FileNotFoundError(err)
 
         try:
-            if resolved.is_dir():
-                if not recursive:
-                    error_msg = f"rm: '{path}' is a directory; use -r for recursive removal"
-                    self._logger.error(error_msg)
-                    raise IsADirectoryError(error_msg)
-                self._logger.debug(f"rm: rmtree '{resolved}'")
-                shutil.rmtree(resolved)
-            else:
-                self._logger.debug(f"rm: unlink '{resolved}'")
-                resolved.unlink()
+            if res.is_dir():
+                if not r:
+                    err = f"rm: '{path}' является директорией, используйте -r для рекурсивного удаления"
+                    self._logger.error(err)
+                    raise IsADirectoryError(err)
+                self._logger.debug(f"rm: rmtree '{res}'")
+                shutil.rmtree(res)
 
-            self._logger.info(f"rm: Removed '{resolved}'")
+            else:
+                self._logger.debug(f"rm: unlink '{res}'")
+                res.unlink()
+
+            self._logger.info(f"rm: Удалено '{res}'")
         except PermissionError as e:
-            self._logger.exception(f"rm: Permission denied while removing '{resolved}': {e}")
+            self._logger.exception(f"rm: Удаление запрещено '{res}': {e}")
             raise
         except OSError as e:
-            self._logger.exception(f"rm: OS error while removing '{resolved}': {e}")
+            self._logger.exception(f"rm: Ошибка операционной системы во время удаления '{res}': {e}")
             raise
+
+
+    def zip(self, path: PathLike[str] | str, path_arch: PathLike[str] | str) -> None:
+        """
+        Функция создаёт zip‑архив из указанного каталога средствами стандартной библиотеки и обрабатывает возможные ошибки
+        :param path: путь к каталогу‑источнику для упаковки
+        :param path_arch: путь к итоговому ZIP‑файлу
+        :return: функция ничего не возвращает
+        """
+        src_dir = Path(path)
+        dst_zip = Path(path_arch)
+        self._logger.info(f"zip: Изначальная папка: '{src_dir.resolve()}', архивированная: '{dst_zip.resolve()}'")
+        try:
+            if not src_dir.exists():
+                err = f"zip: Источник не найден: '{src_dir}'"
+                self._logger.error(err)
+                raise FileNotFoundError(err)
+
+            if not src_dir.is_dir():
+                err = f"zip: Источник не каталог: '{src_dir}'"
+                self._logger.error(err)
+                raise NotADirectoryError(err)
+
+            dst_zip.parent.mkdir(parents=True, exist_ok=True)
+
+            with zipfile.ZipFile(dst_zip, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+                for path in src_dir.rglob("*"):
+                    arcname = path.relative_to(src_dir)
+                    if path.is_dir():
+                        continue
+                    self._logger.debug(f"zip: Добавляем '{path}' как '{arcname}'")
+                    zf.write(path, arcname)
+            self._logger.info(f"zip: Готово -> '{dst_zip.resolve()}'")
+        except Exception:
+            self._logger.exception("zip: Ошибка при создании архива")
+            raise
+
+
+    def unzip(self, path_arch: PathLike[str] | str, res: PathLike[str] | str | None = None) -> None:
+        """
+        Функция распаковывает zip‑архив в указанную директорию и обрабатывает возможные ошибки
+        :param path_arch: путь к zip‑архиву
+        :param res: папка назначения
+        :return: функция ничего не возвращает
+        """
+        src_zip = Path(path_arch)
+
+        if res is not None:
+            dst_dir = Path(res)
+        else:
+            dst_dir = Path.cwd()
+
+        self._logger.info(f"unzip: Изначальный архив: '{src_zip.resolve()}', папка назначения: '{dst_dir.resolve()}'")
+
+        try:
+            if not src_zip.exists():
+                err = f"unzip: Архив не найден: '{src_zip}'"
+                self._logger.error(err)
+                raise FileNotFoundError(err)
+
+            dst_dir.mkdir(parents=True, exist_ok=True)
+
+            with zipfile.ZipFile(src_zip, mode="r") as zf:
+                zf.extractall(dst_dir)
+            self._logger.info(f"unzip: Готово -> '{dst_dir.resolve()}'")
+        except Exception:
+            self._logger.exception("unzip: Ошибка при распаковке архива")
+            raise
+
+
+    def tar_dir(self, path_file: PathLike[str] | str, path_arch: PathLike[str] | str) -> None:
+        """
+        Функция Создаёт tar.gz архив из указанного каталога с помощью tarfile и обрабатывает возможные ошибки
+        :param path_file: путь к каталогу‑источнику для упаковки
+        :param path_arch: путь к результирующему tar.gz архиву
+        :return: Функция ничего не возвращает
+        """
+
+        src_dir = Path(path_file)
+        dst_tar = Path(path_arch)
+        self._logger.info(f"tar: Начальная папка: '{src_dir.resolve()}', архив: '{dst_tar.resolve()}'")
+
+        try:
+            if not src_dir.exists():
+                err = f"tar: Источник не найден: '{src_dir}'"
+                self._logger.error(err)
+                raise FileNotFoundError(err)
+            if not src_dir.is_dir():
+                err = f"tar: Источник не каталог: '{src_dir}'"
+                self._logger.error(err)
+                raise NotADirectoryError(err)
+
+            dst_tar.parent.mkdir(parents=True, exist_ok=True)
+            with tarfile.open(dst_tar, mode="w:gz") as tf:
+                tf.add(src_dir, arcname=src_dir.name)
+                self._logger.info(f"tar: Готово -> '{dst_tar.resolve()}'")
+        except Exception:
+            self._logger.exception("tar: Ошибка при создании архива")
+            raise
+
+
+    def untar(self, path_archive_tar_gz: PathLike[str] | str, res: PathLike[str] | str | None = None) -> None:
+        """
+        Функция распаковывает tar.gz архив в указанную директорию и обрабатывает ошибки
+        :param path_archive_tar_gz: путь к tar.gz архиву
+        :param res: папка назначения
+        :return: функция ничего не возвращает
+        """
+        src_tar = Path(path_archive_tar_gz)
+        if res is not None:
+            dst_dir = Path(res)
+        else:
+            dst_dir = Path.cwd()
+        self._logger.info(f"untar: Изначальный архив: '{src_tar.resolve()}', dest='{dst_dir.resolve()}'")
+        try:
+            if not src_tar.exists():
+                err = f"untar: Архив не найден: '{src_tar}'"
+                self._logger.error(err)
+                raise FileNotFoundError(err)
+            dst_dir.mkdir(parents=True, exist_ok=True)
+            with tarfile.open(src_tar, mode="r:gz") as tf:
+                tf.extractall(dst_dir)
+            self._logger.info(f"untar: Готово -> '{dst_dir.resolve()}'")
+        except Exception:
+            self._logger.exception("untar: Ошибка при распаковке архива")
+            raise
+
+
+    def grep(self, pattern: str, path: PathLike[str] | str, r: bool, ignore_case: bool) -> list[str]:
+        """
+        Функция совершает поиск строк по регулярному выражению в файлах и обрабатывает возможные ошибки
+        :param pattern: регулярное выражение для поиска
+        :param path: файл или каталог, в котором будет производиться поиск
+        :param r: True/False (рекурсивный обход подкаталогов/нет)
+        :param ignore_case: True/False (поиск без учёта регистра/нет)
+        :return: функция ничего не возвращаает
+        """
+        logger = self._logger
+        flags: re.RegexFlag
+        if ignore_case:
+            flags = re.IGNORECASE
+        else:
+            flags = re.RegexFlag(0)
+        try:
+            rgx = re.compile(pattern, flags)
+        except re.error as e:
+            logger.error(f"grep: Ошибка компиляции regex: {e}")
+            raise
+
+        base = Path(path)
+        files: list[Path] = []
+        if base.is_file():
+            files = [base]
+        else:
+            if r:
+                for p in base.rglob('*'):
+                    if p.is_file():
+                        files.append(p)
+            else:
+                for p in base.glob('*'):
+                    if p.is_file():
+                        files.append(p)
+
+        results: list[str] = []
+        for file_path in files:
+            try:
+                with file_path.open(encoding='utf-8', errors='ignore') as fh:
+                    for ln, line in enumerate(fh, 1):
+                        if rgx.search(line):
+                            results.append(f"{file_path}:{ln}:{line.strip()}")
+            except Exception as e:
+                logger.error(f"grep: Ошибка чтения файла {file_path}: {e}")
+        logger.info(f"grep: pattern={pattern}, path={base}, recursive={r}, ignore_case={ignore_case}, results={len(results)}")
+        return results

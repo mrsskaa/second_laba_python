@@ -1,52 +1,14 @@
-# Импорт абстрактного базового класса и декоратора для создания абстрактных методов
-# ABC - абстрактный базовый класс, который нельзя создать напрямую
-# abstractmethod - декоратор для методов, которые должны быть реализованы в дочерних классах
 from abc import ABC, abstractmethod
-
-# Импорт типа PathLike для работы с путями файловой системы
-# PathLike - тип для объектов, которые представляют путь к файлу (строки, Path и т.д.)
 from os import PathLike
-
-# Импорт типа Literal для создания литеральных типов
-# Literal - тип, который может быть только одним из указанных значений
 from typing import Literal
 
-# Импорт перечислений для режимов чтения файлов и отображения
 from src.enums import FileReadMode, FileDisplayMode
 
-
-# ============================================
-# БАЗОВЫЙ КЛАСС ДЛЯ СЕРВИСОВ КОНСОЛИ
-# ============================================
-
 class OSConsoleServiceBase(ABC):
-    """
-    Абстрактный базовый класс для сервисов консоли операционной системы.
-
-    Что это такое?
-    - Это "чертеж" для создания сервисов консоли
-    - Определяет, какие методы ДОЛЖНЫ быть реализованы в дочерних классах
-    - Нельзя создать объект этого класса напрямую
-
-    Зачем это нужно?
-    - Унификация: все сервисы консоли имеют одинаковый интерфейс
-    - Полиморфизм: можно использовать любой сервис через базовый класс
-    - Масштабируемость: легко добавить поддержку других ОС (Linux, Mac)
-
-    Пример дочернего класса:
-    - WindowsConsoleService - реализация для Windows
-    - В будущем: LinuxConsoleService, MacConsoleService
-    """
-
     @abstractmethod
     def ls(self, path: PathLike[str] | str, display_mode: FileDisplayMode = FileDisplayMode.simple) -> list[str]:
         """
         Абстрактный метод для отображения содержимого директории.
-
-        Что делает?
-        - Получает список файлов и папок в указанной директории
-        - Форматирует их в зависимости от режима отображения
-
         :param path: Путь к директории для отображения
                      Может быть строкой "C:/Users" или объектом Path
         :param display_mode: Режим отображения (простой или подробный)
@@ -54,13 +16,7 @@ class OSConsoleServiceBase(ABC):
                              detailed - с размером, датой, правами
         :return: Список строк с информацией о файлах и директориях
                  Каждая строка заканчивается переносом строки \n
-
-        Почему абстрактный?
-        - Каждая ОС реализует это по-своему
-        - Windows и Linux могут по-разному форматировать права доступа
         """
-        # ... означает, что метод не имеет реализации
-        # Дочерние классы ОБЯЗАНЫ реализовать этот метод
         ...
 
     @abstractmethod
@@ -158,6 +114,71 @@ class OSConsoleServiceBase(ABC):
         :raises FileNotFoundError: Если путь не существует
         :raises IsADirectoryError: Если удаляем каталог без recursive=True
         :raises PermissionError: Если недостаточно прав
+        :raises OSError: Прочие ошибки файловой системы
+        """
+        ...
+
+    @abstractmethod
+    def zip(self, path: PathLike[str] | str, path_arch: PathLike[str] | str) -> None:
+        """
+        Абстрактный метод для создания ZIP‑архива из каталога.
+
+        :param path: Путь к каталогу‑источнику для упаковки
+        :param path_arch: Путь к результирующему ZIP‑файлу
+        :raises FileNotFoundError: Если каталог‑источник не существует
+        :raises NotADirectoryError: Если источник не является каталогом
+        :raises OSError: Прочие ошибки файловой системы
+        """
+        ...
+
+    @abstractmethod
+    def unzip(self, path_arch: PathLike[str] | str, res: PathLike[str] | str | None = None) -> None:
+        """
+        Абстрактный метод для распаковки ZIP‑архива.
+
+        :param path_arch: Путь к ZIP‑архиву
+        :param res: Папка назначения; если None — используется текущая рабочая директория
+        :raises FileNotFoundError: Если архив не существует
+        :raises OSError: Прочие ошибки файловой системы
+        """
+        ...
+
+    @abstractmethod
+    def tar_dir(self, path_file: PathLike[str] | str, path_arch: PathLike[str] | str) -> None:
+        """
+        Абстрактный метод для создания TAR.GZ архива из каталога.
+
+        :param path_file: Путь к каталогу‑источнику для упаковки
+        :param path_arch: Путь к результирующему TAR.GZ архиву
+        :raises FileNotFoundError: Если каталог‑источник не существует
+        :raises NotADirectoryError: Если источник не является каталогом
+        :raises OSError: Прочие ошибки файловой системы
+        """
+        ...
+
+    @abstractmethod
+    def untar(self, path_archive_tar_gz: PathLike[str] | str, res: PathLike[str] | str | None = None) -> None:
+        """
+        Абстрактный метод для распаковки TAR.GZ архива.
+
+        :param path_archive_tar_gz: Путь к TAR.GZ архиву
+        :param res: Папка назначения; если None — используется текущая рабочая директория
+        :raises FileNotFoundError: Если архив не существует
+        :raises OSError: Прочие ошибки файловой системы
+        """
+        ...
+
+    @abstractmethod
+    def grep(self, pattern: str, path: PathLike[str] | str, r: bool, ignore_case: bool) -> list[str]:
+        """
+        Абстрактный метод для поиска строк по регулярному выражению в файлах.
+
+        :param pattern: Регулярное выражение для поиска
+        :param path: Файл или каталог, в котором вести поиск
+        :param r: Рекурсивный обход подкаталогов, если указан каталог
+        :param ignore_case: Поиск без учёта регистра
+        :return: Список строк формата "file:line:text"
+        :raises re.error: Если регулярное выражение некорректно
         :raises OSError: Прочие ошибки файловой системы
         """
         ...

@@ -1,470 +1,282 @@
-# ============================================
-# ИМПОРТЫ - Подключаем нужные модули и библиотеки
-# ============================================
 from src.errorss import NotInitContainer
-# Импорт конфигурации логирования из модуля config
-# LOGGING_CONFIG - это словарь со всеми настройками логирования
 from src.config import LOGGING_CONFIG
-
-# Импорт модуля для настройки логирования
-# logging.config - позволяет настроить логи по словарю настроек
 import logging.config
-# Импорт модуля sys для работы с системными потоками ввода/вывода
-# sys.stdout - стандартный поток вывода (куда выводится текст)
-# sys.stdout.buffer - буфер для бинарных данных
 import sys
-
-# Импорт Path из pathlib для работы с путями файловой системы
-# Path - класс для удобной работы с файлами и папками
 from pathlib import Path
-
-# Импорт основного класса Typer для создания CLI приложения
-# typer - библиотека для создания командной строки
 import typer
-# Импорт дополнительных классов Typer для работы с контекстом
-# Typer - класс для создания CLI приложения
-# Context - контекст, который передается между командами
 from typer import Typer, Context
-
-# Импорт контейнера зависимостей для управления сервисами
-# Container - класс, который хранит все нужные сервисы приложения
 from src.container import Container
-# Импорт перечислений для режимов чтения файлов и отображения
-# FileReadMode - enum: text или bytes
-# FileDisplayMode - enum: simple или detailed
 from src.enums import FileReadMode, FileDisplayMode
-# Импорт сервиса для работы с консолью Windows
-# WindowsConsoleService - класс с методами для работы с файлами в Windows
 from src.services.windows_console import WindowsConsoleService
-import re
-import json
-from datetime import datetime
-import shutil
 
-HISTORY_PATH = Path('.history')  # Файл, куда мы записываем историю команд между запусками
-TRASH_DIR = Path('.trash')  # Папка-корзина, куда перемещаем удаляемые файлы, чтобы их можно было вернуть
-
-
-def _append_history(r: dict) -> None:  # Функция добавляет одну запись (словарь) в конец файла истории
-    try:  # Пытаемся выполнить запись, но не ломаем программу при ошибках
-        HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)  # Создаём папку для файла истории, если её нет
-        with HISTORY_PATH.open('a', encoding='utf-8') as f:  # Открываем файл истории на дозапись в кодировке UTF‑8
-            s = json.dumps(r, ensure_ascii=False) + "\n"  # Превращаем словарь в строку JSON и добавляем перевод строки
-            f.write(("" + s))  # Пишем строку в файл (лишняя конкатенация для наглядности, но не мешает)
-    except Exception:  # Ловим любые ошибки записи
-        pass  # Если запись истории не удалась — просто игнорируем, на работу команд это не влияет
-
-
-def _read_history() -> list[dict]:  # Читает все записи истории из файла и возвращает список словарей
-    if not HISTORY_PATH.exists():  # Если файла истории нет
-        return []  # Возвращаем пустой список
-    rs: list[dict] = []  # Здесь будем накапливать прочитанные записи
-    try:  # Защищаем чтение от ошибок
-        with HISTORY_PATH.open('r', encoding='utf-8') as f:  # Открываем файл истории на чтение
-            txt = f.read()  # Читаем сразу весь файл в одну большую строку (проще для объяснения)
-            for ln in txt.splitlines():  # Разбиваем содержимое на строки — каждая строка это одна запись JSON
-                ln = ln.strip()  # Убираем пробелы по краям
-                if not ln:  # Пропускаем пустые строки
-                    continue
-                try:  # Пробуем превратить строку JSON в словарь Python
-                    rs.append(json.loads(ln))  # Добавляем запись в список
-                except Exception:  # Если строка повреждена
-                    continue  # Пропускаем её, не мешаем работе
-    except Exception:  # Если не получилось прочитать файл вообще
-        return []  # Считаем, что истории пока нет
-    return rs  # Возвращаем список записей
-
-
-def _write_history(rs: list[dict]) -> None:  # Полностью перезаписывает файл истории переданным списком записей
-    try:  # Делаем запись безопасно
-        with HISTORY_PATH.open('w', encoding='utf-8') as f:  # Открываем файл истории на перезапись
-            buf: list[str] = []  # Будем складывать будущие строки в список (простой способ показать шаги)
-            for r in rs:  # Берём каждую запись-словарь
-                buf.append(json.dumps(r, ensure_ascii=False) + "\n")  # Превращаем в строку JSON и добавляем перевод строки
-            for s in buf:  # Теперь построчно записываем в файл
-                f.write(s)  # Записываем строку
-    except Exception:  # На ошибке записи
-        pass  # Молча игнорируем, чтобы не падать
-
-
-def _pop_last_action() -> dict | None:  # Возвращает и удаляет из истории последнюю команду cp/mv/rm
-    rs = _read_history()  # Сначала читаем все записи истории
-    for i in range(len(rs) - 1, -1, -1):  # Идём с конца к началу (последние — самые новые)
-        if rs[i].get('cmd') in {'cp', 'mv', 'rm'}:  # Ищем запись о копировании, перемещении или удалении
-            r = rs.pop(i)  # Удаляем найденную запись из списка и запоминаем её
-            _write_history(rs)  # Перезаписываем историю без этой записи
-            return r  # Возвращаем найденную запись для отката
-    return None  # Если подходящих команд не нашли — возвращаем пусто
-
-
-def _ensure_trash() -> Path:  # Убеждается, что папка-корзина существует, и возвращает её путь
-    TRASH_DIR.mkdir(parents=True, exist_ok=True)  # Создаёт папку .trash и её родителей, если нужно
-    return TRASH_DIR  # Возвращаем путь к корзине
-
-
-# ============================================
-# СОЗДАНИЕ ПРИЛОЖЕНИЯ
-# ============================================
-
-# Создание экземпляра Typer приложения для обработки команд
-# app - это наш CLI, к которому будут привязаны команды
 app = Typer()
 
-
-# ============================================
-# ВСПОМОГАТЕЛЬНАЯ ФУНКЦИЯ
-# ============================================
-
-def get_container(x: Context)->Container:
+def get_container(ctx: Context)->Container:
     """
-    Функция для получения контейнера зависимостей из контекста Typer.
-    Проверяет, что контейнер правильно инициализирован.
-
-    :param x: Контекст Typer, содержащий объекты приложения
+    Функция получает контейнера зависимостей из контекста Typer и проверяет, что контейнер правильно инициализирован.
+    :param ctx: Контекст Typer
     :return: Контейнер зависимостей
     :raises RuntimeError: Если контейнер не инициализирован
     """
-    # Получаем объект контейнера из контекста
-    # x.obj - это место, где Typer хранит наши объекты между командами
-    container = x.obj
+    container = ctx.obj
 
-    # Проверяем, что контейнер является экземпляром класса Container
-    # isinstance - встроенная функция для проверки типа объекта
     if not isinstance(container, Container):
-        # Выбрасываем ошибку, если контейнер не инициализирован
-        raise (NotInitContainer("DI container is not initialized"))
+        raise (NotInitContainer("Контейнер не инициализирован"))
 
-    # Возвращаем контейнер
     return container
 
 
-# ============================================
-# CALLBACK - ФУНКЦИЯ, КОТОРАЯ ВЫПОЛНЯЕТСЯ ДО КАЖДОЙ КОМАНДЫ
-# ============================================
-
 @app.callback()
-def main(x: Context)->None:
+def main(ctx: Context)->None:
     """
-    Основная функция-колбэк, которая выполняется перед каждой командой.
-    Инициализирует систему логирования и создает контейнер зависимостей.
-
-    :param x: Контекст Typer для передачи объектов между командами
+    Основная функция, которая выполняется перед каждой командой, инициализирует систему логирования и создает контейнер зависимостей
+    :param ctx: Контекст typer
     """
-    # Настраиваем систему логирования согласно конфигурации
-    # dictConfig - метод, который принимает словарь с настройками логирования
-    # LOGGING_CONFIG - содержит настройки формата, файлов, уровня логирования
     logging.config.dictConfig(LOGGING_CONFIG)
 
-    # Получаем логгер для текущего модуля
-    # __name__ - имя текущего модуля (в данном случае "src.main")
-    # logger - объект для записи логов (инфо, ошибки, отладка)
     logger = logging.getLogger(__name__)
 
-    # Создаем контейнер зависимостей и сохраняем его в контексте
-    # Container - класс, который хранит все нужные сервисы
-    x.obj = Container(
-        # Инициализируем сервис консоли Windows с логгером
-        # WindowsConsoleService - класс с методами ls и cat
-        console_service=WindowsConsoleService(logger=logger),
-    )
+    ctx.obj = Container(console_service=WindowsConsoleService(logger=logger))
 
-
-# ============================================
-# КОМАНДА ls - ПОКАЗАТЬ ФАЙЛЫ В ПАПКЕ
-# ============================================
 
 @app.command()
-def ls(x: Context, path: Path = typer.Argument(".", readable=False, help="Directory path to list"), detailed: bool = typer.Option(False, "-l", "--detailed", help="Show detailed file information")) -> None:
+def ls(ctx: Context, path: Path = typer.Argument(..., readable=False, help="Directory path to list"), detailed: bool = typer.Option(False, "-l", "--detailed", help="Show detailed file information")) -> None:
     """
-    Команда для отображения содержимого директории.
-    Поддерживает простой и подробный режимы отображения.
-
-    :param x: Контекст Typer для доступа к контейнеру зависимостей
-    :return: None (результат выводится в stdout)
+    Функция вызывает команду для отображения содержимого директории ls и обрабатывает ошибки
+    :param ctx: контекст typer
+    :param path: путь к директории
+    :param detailed: True/False (показывать подробную информацию/нет)
+    :return: функция ничего не возвращает
     """
-    try:  # Пытаемся выполнить команду безопасно
-        c: Container = get_container(x)  # Получаем доступ к нашим сервисам (логика работы с файлами)
-
-        dm = FileDisplayMode.simple  # По умолчанию показываем краткий список
-        if detailed:  # Если пользователь добавил флаг -l (подробно)
-            dm = FileDisplayMode.detailed  # Переключаемся на подробный режим
-
-        cnt = c.console_service.ls(path, dm)  # Просим сервис вернуть список строк с файлами для указанной папки
-
-        out = list(cnt)  # Делаем копию списка (это не обязательно, просто наглядный шаг)
-        sys.stdout.writelines(out)  # Пишем все строки в консоль как есть
-
-    except OSError as e:  # Ошибки операционной системы (например, папка не найдена)
-        typer.echo(e)  # Показываем понятное сообщение пользователю
-    except Exception:  # Любая другая непредвиденная ошибка
-        raise  # Пробрасываем наверх, чтобы не скрывать непредвиденные проблемы
-
-
-# ============================================
-# КОМАНДА cat - ПРОЧИТАТЬ ФАЙЛ
-# ============================================
-
-@app.command()
-def cat(x: Context, filename: Path = typer.Argument(..., exists=False, readable=False, help="File to print"), mode: bool = typer.Option(False, "--bytes", "-b", help="Read as bytes")) -> None:
-    """
-    Команда для отображения содержимого файла.
-    Поддерживает чтение в текстовом и бинарном режимах.
-
-    :param x: Контекст Typer для доступа к контейнеру зависимостей
-    :return: None - результат выводится в stdout
-    """
-    try:  # Пытаемся выполнять действия с файлом безопасно
-        c: Container = get_container(x)  # Берём доступ к сервису, который умеет читать файлы
-
-        fm = FileReadMode.string  # По умолчанию читаем файл как текст
-        if mode:  # Если пользователь указал режим байт (-b/--bytes)
-            fm = FileReadMode.bytes  # Переключаемся на бинарное чтение
-
-        d = c.console_service.cat(filename, mode=fm)  # Просим сервис прочитать файл в нужном режиме
-
-        if isinstance(d, bytes):  # Если получили байты (бинарный режим)
-            sys.stdout.buffer.write(d)  # Пишем байты напрямую в консольный буфер
-        else:  # Иначе это текст (строка)
-            t = "" + d  # Делаем лишнюю конкатенацию, чтобы показать шаг (не обязательно)
-            typer.echo(t)  # Выводим текст, корректно обрабатывая кодировку
-
-    except OSError as e:  # Типичные ошибки ОС: файла нет, нет прав, это не файл и т.п.
-        typer.echo(e)  # Показываем понятное сообщение пользователю
-    except Exception as e:  # Любая другая неожиданная ошибка
-        raise e  # Пробрасываем вверх, чтобы не скрывать проблему
-
-
-# ============================================
-# КОМАНДА cd - ПЕРЕЙТИ В ДИРЕКТОРИЮ
-# ============================================
-
-@app.command()
-def cd(x: Context, path: str = typer.Argument(".", help="Directory path to change to"))->None:
-    """
-    Команда для перехода в указанную директорию (смена рабочей директории).
-    Поддерживает относительные и абсолютные пути, а также специальные пути (. , .. , ~).
-
-    :param ctx: Контекст Typer для доступа к контейнеру зависимостей
-
-    :return: None - выводит новый абсолютный путь в stdout
-    """
-
-    """
-        Путь к директории для перехода
-            . - текущая директория
-            .. - родительская директория (на уровень выше)
-            ~ - домашняя директория пользователя
-        """
-    try:  # Пытаемся сменить директорию безопасно
-        c: Container = get_container(x)  # Берём наш сервис для работы с системой
-
-        np = c.console_service.cd(path)  # Просим сервис сменить текущую папку и вернуть её полный путь
-
-        sys.stdout.write(f"{np}\n")  # Печатаем новый полный путь, чтобы пользователь видел результат
-
-    except OSError as e:  # Ошибки ОС: папки нет, нет прав и т.д.
-        typer.echo(e)  # Пишем понятное сообщение в консоль
-    except Exception as e:  # Непредвиденная ошибка
-        raise e  # Не скрываем, пробрасываем наверх
-
-@app.command()
-def cp(x: Context, src: Path = typer.Argument(..., help="Источник (файл или каталог)"), dst: Path = typer.Argument(..., help="Назначение (файл или каталог)"), recursive: bool = typer.Option(False, "-r", "-г", help="Рекурсивное копирование каталогов")) -> None:
-    """
-    Команда копирования файлов/каталогов.
-    Поддерживает флаг -r/-г для рекурсивного копирования каталогов.
-    """
-    try:  # Выполняем копирование и запись в историю безопасно
-        c: Container = get_container(x)  # Берём сервис, умеющий работать с файлами
-        c.console_service.cp(src, dst, recursive=recursive)  # Просим скопировать файл/папку
-        _append_history({  # Фиксируем факт копирования в историю
-            "cmd": "cp",  # Тип команды — копирование
-            "src": str(src),  # Откуда копировали
-            "dst": str(dst),  # Куда копировали
-            "recursive": bool(recursive),  # Было ли рекурсивно (для папок)
-            "timestamp": datetime.now().isoformat(timespec='seconds'),  # Время выполнения
-        })
-    except OSError as e:  # Ошибки ОС (нет прав, нет файла и т.д.)
-        typer.echo(e)  # Показываем сообщение пользователю
-    except Exception as e:  # Непредвиденная ошибка
-        raise e  # Пробрасываем наверх
-
-@app.command()
-def mv(x: Context, src: Path = typer.Argument(..., help="Источник (файл или каталог)"), dst: Path = typer.Argument(..., help="Назначение (файл, каталог или новое имя)")) -> None:
-    """
-    Команда перемещения/переименования файла или каталога.
-    Поддерживает перемещение в существующий каталог.
-    """
-    try:  # Выполняем перемещение и запись в историю безопасно
-        c = get_container(x)  # Берём сервис
-        c.console_service.mv(src, dst)  # Перемещаем/переименовываем
-        _append_history({  # Записываем событие в историю
-            "cmd": "mv",  # Тип команды — перемещение
-            "src": str(src),  # Откуда
-            "dst": str(dst),  # Куда
-            "timestamp": datetime.now().isoformat(timespec='seconds'),  # Когда
-        })
-    except OSError as e:  # Ошибки ОС
-        typer.echo(e)  # Пишем читабельную ошибку
-    except Exception as e:  # Иное
-        raise e  # Пробрасываем
-
-@app.command()
-def rm(x: Context, target: Path = typer.Argument(..., help="Путь к удаляемому файлу или каталогу"), recursive: bool = typer.Option(False, "-r", "-г", help="Рекурсивное удаление каталога")) -> None:
-    """
-    Команда удаления файла/каталога. Для каталогов требует -r/-г и подтверждение.
-    Ограничение: удаление выполняется через перемещение в .trash для возможности undo.
-    """
-    try:  # Пытаемся "удалить" безопасно (на самом деле переносим в корзину)
-        lg = logging.getLogger(__name__)  # Логгер для записей в файл логов
-        # Подтверждение при рекурсивном удалении
-        if target.is_dir() and not recursive:  # Если это папка и пользователь не указал -r
-            typer.echo(f"Ошибка: {target} — это директория. Укажите -r для рекурсивного удаления.")  # Просим явного подтверждения через флаг
-            return  # Прекращаем команду
-        if target.is_dir() and recursive:  # Если это папка и указан -r
-            answer = typer.prompt("Вы уверены, что хотите удалить каталог рекурсивно? (у/п)")  # Спрашиваем подтверждение у пользователя
-            if answer.strip().lower() not in {"y", "yes", "у", "да"}:  # При любом ответе, отличном от "да"
-                typer.echo("Операция отменена")  # Сообщаем, что ничего не делаем
-                return  # Выходим
-        if not target.exists():  # Если такого пути вообще нет
-            typer.echo(f"Файл или каталог не найден: {target}")  # Сообщаем об этом
-            return  # И прекращаем выполнение
-        tr = _ensure_trash()  # Убеждаемся, что корзина существует
-        ts = datetime.now().strftime('%Y%m%d_%H%M%S')  # Делаем метку времени вида ГГГГММДД_ччммсс
-        un = f"{target.name}__{ts}"  # Формируем уникальное имя для корзины (имя + время)
-        tp = tr / un  # Путь, куда положим удаляемый объект
-        # Гарантия уникальности
-        k = 1  # Счётчик для попыток, если имя вдруг занято
-        while tp.exists():  # Пока такое имя уже есть в корзине
-            tp = tr / f"{target.name}__{ts}_{k}"  # Добавляем счётчик к имени
-            k += 1  # Переходим к следующему номеру
-        # Перемещаем в корзину
-        shutil.move(str(target), str(tp))  # Перемещаем файл/папку в корзину (а не удаляем навсегда)
-        lg.info(f"rm: Moved '{target}' to trash '{tp}'")  # Записываем в лог, куда именно переместили
-        _append_history({
-            "cmd": "rm",
-            "target": str(target),
-            "trash_path": str(tp),
-            "timestamp": datetime.now().isoformat(timespec='seconds'),
-        })
-    except OSError as e:  # Ошибка уровня ОС (нет прав, файл занят и т.п.)
-        typer.echo(e)  # Показываем понятное сообщение
-    except Exception as e:  # Непредвиденная ошибка
-        raise e  # Пробрасываем дальше
-
-@app.command()
-def dgrep(
-    x: Context,
-    pattern: str = typer.Argument(..., help="Шаблон для поиска (регулярное выражение)"),
-    path: Path = typer.Argument('.', help="Каталог или файл для поиска"),
-    recursive: bool = typer.Option(False, '-г', '--recursive', help="Рекурсивный поиск в подкаталогах"),
-    ignore_case: bool = typer.Option(False, '-і', '--ignore-case', help="Поиск без учёта регистра")
-) -> None:
-    """
-    Поиск строк по регулярному выражению в файлах.
-    Пример: dgrep
-    """
-    lg = logging.getLogger("dgrep")  # Логгер для записей о работе поиска
-    rs = []  # Здесь будем собирать найденные совпадения (как строки)
-    flg = re.IGNORECASE if ignore_case else 0  # Флаг для регулярок: игнорировать ли регистр букв
     try:
-        # Неоптимально: два шага — сначала присваиваем переменной, потом используем
-        rgx = re.compile(pattern, flg)  # Превращаем текстовый шаблон в объект регулярного выражения
-    except re.error as e:
-        typer.echo(f"Ошибка в регулярном выражении: {e}")  # Если шаблон неправильный — говорим об этом
-        lg.error(f"Ошибка в regex: {e}")  # И записываем ошибку в лог
-        return
-    fs = []  # Здесь будет список файлов, в которых мы ищем
-    # Собираем список файлов
-    if path.is_file():
-        fs = [path]  # Если пользователь указал конкретный файл — ищем только в нём
-    else:
-        if recursive:
-            fs = [p for p in path.rglob('*') if p.is_file()]  # Рекурсивно собираем все файлы внутри папки
-        else:
-            fs = [p for p in path.glob('*') if p.is_file()]  # Только файлы из указанной папки (без подпапок)
-    for fn in fs:  # Перебираем каждый файл по очереди
-        try:
-            with fn.open(encoding="utf-8", errors="ignore") as f:  # Открываем файл в текстовом режиме, игнорируя ошибки кодировки
-                for ln, s in enumerate(f, 1):  # Читаем файл построчно, ln — номер строки с 1
-                    m = rgx.search(str(s))  # Ищем совпадение в строке (лишний str() — но наглядно)
-                    if m:  # Если нашлось
-                        r = f"{fn}:{ln}:{s.strip()}"  # Формируем строку: путь к файлу, номер строки и сам текст
-                        rs.append(r)  # Сохраняем найденное в общий список
-        except Exception as e:
-            lg.error(f"Ошибка чтения файла {fn}: {e}")  # Если файл не читается — записываем в лог и идём дальше
-    for r in rs:  # Когда всё прочитали — выводим найденные совпадения в консоль
-        typer.echo(r)  # Печать одной строки результата
-    lg.info(f"dgrep: pattern={pattern}, path={path}, recursive={recursive}, ignore_case={ignore_case}, results={len(rs)}")  # В лог пишем сводку о поиске
+        call: Container = get_container(ctx)
+        dm = FileDisplayMode.simple
 
-@app.command()
-def history(x: Context, n: int = typer.Argument(10, help="Сколько последних команд показать")) -> None:
-    """
-    Вывод последних N введённых команд с их номерами (из файла .history).
-    """
-    rs = _read_history()  # Загружаем весь список записей из файла
-    tl = rs[-n:] if n > 0 else rs  # Берём последние N записей, либо все, если N не положительное
-    si = max(0, len(rs) - len(tl))  # Вычисляем номер, с которого начать нумерацию строк
-    for i, r in enumerate(tl, start=si + 1):  # Перебираем выбранные записи с нужной нумерацией
-        c = r.get('cmd')  # Тип команды (cp/mv/rm)
-        t = r.get('timestamp', '')  # Время выполнения (может отсутствовать)
-        if c == 'cp':  # Для копирования печатаем src и dst
-            typer.echo(f"{i}: [{t}] cp {r.get('src')} -> {r.get('dst')} (recursive={r.get('recursive')})")
-        elif c == 'mv':  # Для перемещения печатаем откуда и куда
-            typer.echo(f"{i}: [{t}] mv {r.get('src')} -> {r.get('dst')}")
-        elif c == 'rm':  # Для удаления показываем путь в корзину
-            typer.echo(f"{i}: [{t}] rm {r.get('target')} -> {r.get('trash_path')}")
-        else:  # На всякий случай — печать неизвестной команды
-            typer.echo(f"{i}: [{t}] {c}")
+        if detailed:
+            dm = FileDisplayMode.detailed
 
-
-@app.command()
-def undo(x: Context) -> None:
-    """
-    Отмена последней команды из списка cp, mv, rm.
-    cp — удаляет скопированный файл/каталог.
-    mv — возвращает объект в исходное место.
-    rm — восстанавливает из .trash.
-    """
-    lg = logging.getLogger(__name__)  # Логгер для записи хода undo
-    r = _pop_last_action()  # Берём последнюю команду cp/mv/rm из истории и убираем её оттуда
-    if not r:  # Если таких команд нет
-        typer.echo("Нет команд для отмены")  # Сообщаем пользователю
-        return  # И выходим
-    c = r.get('cmd')  # Определяем, какую команду нужно откатывать
-    try:
-        if c == 'cp':  # Откат копирования
-            dst = Path(r['dst'])  # Копия лежит по адресу dst
-            if dst.is_dir():  # Если это папка — удаляем всю папку
-                shutil.rmtree(dst, ignore_errors=True)
-            elif dst.exists():  # Если это файл — удаляем файл
-                dst.unlink(missing_ok=True)  # type: ignore[attr-defined]
-            typer.echo(f"undo: удалён скопированный объект {dst}")  # Сообщаем об успешном откате
-        elif c == 'mv':  # Откат перемещения
-            src = Path(r['src'])  # Исходный путь
-            dst = Path(r['dst'])  # Куда переместили
-            src.parent.mkdir(parents=True, exist_ok=True)  # На всякий случай создаём папку-родителя
-            shutil.move(str(dst), str(src))  # Перемещаем обратно
-            typer.echo(f"undo: перемещено обратно {dst} -> {src}")  # Сообщаем результат
-        elif c == 'rm':  # Откат удаления
-            target = Path(r['target'])  # Где объект должен лежать
-            tp = Path(r['trash_path'])  # Где лежит копия в корзине
-            if not tp.exists():  # Если в корзине ничего не нашли
-                typer.echo(f"undo: не найден объект в корзине: {tp}")  # Сообщаем проблему
-                return  # И прекращаем
-            target.parent.mkdir(parents=True, exist_ok=True)  # Создаём родительскую папку, если надо
-            shutil.move(str(tp), str(target))  # Возвращаем объект из корзины на место
-            typer.echo(f"undo: восстановлено {target}")  # Печатаем успешный результат
-        else:  # Если команда нам неизвестна
-            typer.echo(f"Команда {c} не поддерживается для undo")  # Сообщаем это
+        cnt = call.console_service.ls(path, dm)
+        out = list(cnt)
+        sys.stdout.writelines(out)
+    except OSError as e:
+        typer.echo(e)
     except Exception as e:
-        lg.exception(f"undo: ошибка {e}")  # Пишем полную информацию об ошибке в файл логов
-        typer.echo(f"Ошибка при отмене: {e}")  # Сообщаем пользователю
-# ============================================
-# ТОЧКА ВХОДА - ЗАПУСК ПРИЛОЖЕНИЯ
-# ============================================
+        raise e
+
+
+@app.command()
+def cat(ctx: Context, path: Path = typer.Argument(..., exists=False, readable=False, help="File to print"), mode: bool = typer.Option(False, "--bytes", "-b", help="Read as bytes")) -> None:
+    """
+    Функция вызывает команду для отображения содержимого файла cat и обрабатывает ошибки
+    :param ctx: контекст Typer
+    :param path: путь к файлу
+    :param mode: True/False (читать файл в бинарном режиме (байты)/как текст)
+    :return: функция ничего не возвращает
+    """
+    try:
+        c: Container = get_container(ctx)
+        read_mode = FileReadMode.string
+
+        if mode:
+            read_mode = FileReadMode.bytes
+
+        d = c.console_service.cat(path, mode=read_mode)
+
+        if isinstance(d, bytes):
+            sys.stdout.buffer.write(d)
+
+        else:
+            typer.echo(str(d))
+    except OSError as e:
+        typer.echo(e)
+    except Exception as e:
+        raise e
+
+
+@app.command()
+def cd(ctx: Context, path: str = typer.Argument(..., help="Directory path to change to"))->None:
+    """
+    Функция вызывает команду для смены текущей рабочей директории cd и обрабатывает ошибки
+    :param ctx: контекст Typer
+    :param path: путь к директории
+    :return: функция ничего не возвращает
+    """
+    try:
+        call: Container = get_container(ctx)
+        new_path = call.console_service.cd(path)
+        sys.stdout.write(f"{new_path}\n")
+    except OSError as e:
+        typer.echo(e)
+    except Exception as e:
+        raise e
+
+
+@app.command()
+def cp(ctx: Context, path1: Path = typer.Argument(..., help="Источник (файл или каталог)"), path2: Path = typer.Argument(..., help="Назначение (файл или каталог)"), r: bool = typer.Option(False, "-r", "-г", help="Рекурсивное копирование каталогов")) -> None:
+    """
+    Функция вызывает команду копирования файлов/каталогов cp и обрабатывает ошибки
+    :param ctx: контекст Typer
+    :param path1: путь к источнику
+    :param path2: путь к назначению
+    :param r: True/False (рекурсивно копировать каталоги/нет)
+    :return: функция ничего не возвращает
+    """
+    try:
+        c: Container = get_container(ctx)
+        c.console_service.cp(path1, path2, recursive=r)
+
+    except OSError as e:
+        typer.echo(e)
+    except Exception as e:
+        raise e
+
+@app.command()
+def mv(ctx: Context, path1: Path = typer.Argument(..., help="Источник (файл или каталог)"), path2: Path = typer.Argument(..., help="Назначение (файл, каталог или новое имя)")) -> None:
+    """
+    Функция запускает команду перемещения/переименования файла/каталога mv и обрабатывает ошибки
+    :param ctx: контекст Typer
+    :param path1: источник
+    :param path2: назначение
+    :return: функция ничего не возвращает
+    """
+    try:
+        c = get_container(ctx)
+        c.console_service.mv(path1, path2)
+    except OSError as e:
+        typer.echo(e)
+    except Exception as e:
+        raise e
+
+@app.command()
+def rm(ctx: Context, path: Path = typer.Argument(..., help="Путь к удаляемому файлу или каталогу"), r: bool = typer.Option(False, "-r", help="Рекурсивное удаление каталога")) -> None:
+    """
+    Функция запускает команду удаления файла/каталога rm и обрабатывает ошибки
+    :param ctx: контекст Typer
+    :param path: путь к удаляемому файлу или каталогу
+    :param r: True/False (рекурсивное удаление каталога/нет)
+    :return: функция ничего не возвращает
+    """
+    try:
+        if path.is_dir() and not r:
+            typer.echo(f"Ошибка: {path} — это директория. Укажите -r для рекурсивного удаления.")
+
+        if path.is_dir() and r:
+            answer = typer.prompt("Вы уверены, что хотите удалить каталог рекурсивно? (да/нет)")
+            if answer.strip().lower() not in {"да"}:
+                typer.echo("Операция отменена")
+                return
+
+        if not path.exists():
+            typer.echo(f"Файл или каталог не найден: {path}")
+            return
+
+    except OSError as e:
+        typer.echo(e)
+    except Exception:
+        raise
+
+
+@app.command()
+def zip(ctx: Context, path: Path = typer.Argument(..., help="Каталог для упаковки"), path_arch: Path = typer.Argument(..., help="Файл архива ZIP")) -> None:
+    """
+    Функция вызывает команду zip, которая создаёт архив формата zip из указанного каталога, и обрабатывает ошибки
+    :param ctx: контекст Typer
+    :param path: путь к каталогу
+    :param path_arch: путь к итоговому zip-файлу
+    :return: функция ничего не возвращает
+    """
+    try:
+        c: Container = get_container(ctx)
+        c.console_service.zip(path, path_arch)
+        typer.echo(f"zip: Cоздан архив {path_arch}")
+
+    except OSError as e:
+        typer.echo(e)
+    except Exception as e:
+        raise e
+
+@app.command()
+def unzip(ctx: Context, path_arch: Path = typer.Argument(..., help="ZIP архив для распаковки"), res: Path = typer.Argument(None, help="Папка назначения (по умолчанию текущая)", show_default=False)) -> None:
+    """
+    Функция вызывает команду unzip, которая распаковывает zip‑архив в указанную директорию (или текущую, если не задано) и обрабатывает ошибки
+    :param ctx: Контекст Typer для доступа к контейнеру зависимостей
+    :param path_arch: путь к zip-файлу
+    :param res: папка назначения (если None — используется текущая рабочая директория)
+    :return: функция ничего не возвращает
+    """
+    try:
+        c: Container = get_container(ctx)
+        c.console_service.unzip(path_arch, res)
+
+        if res:
+            typer.echo(f"unzip: распаковано в {res}")
+        else:
+            typer.echo(f"unzip: распаковано в {Path('.').resolve()}")
+    except OSError as e:
+        typer.echo(e)
+    except Exception as e:
+        raise e
+
+@app.command()
+def tar(ctx: Context, path: Path = typer.Argument(..., help="Каталог для упаковки"), path_arch: Path = typer.Argument(..., help="Файл архива TAR.GZ")) -> None:
+    """
+    Функция вызывает команду tar, которая создаёт архив формата tar.gz из указанного каталога и обрабатывает ошибки
+    :param ctx: Контекст Typer для доступа к контейнеру зависимостей
+    :param path: Путь к каталогу для упаковки
+    :param path_arch: Путь к результирующему TAR.GZ файлу
+    :return: функция ничего не возвращает
+    """
+    try:
+        c: Container = get_container(ctx)
+        c.console_service.tar_dir(path, path_arch)
+        typer.echo(f"tar: Cоздан архив {path_arch}")
+    except OSError as e:
+        typer.echo(e)
+    except Exception as e:
+        raise e
+
+@app.command()
+def untar(ctx: Context, path_arch: Path = typer.Argument(..., help="TAR.GZ архив для распаковки"), res: Path = typer.Argument(None, help="Папка назначения (по умолчанию текущая)", show_default=False)) -> None:
+    """
+    Функция вызывает команду untar, которая распаковывает tar.gz архив в указанную директорию (или текущую, если не задано)
+    :param ctx: контекст Typer
+    :param path_arch: путь к tar архиву
+    :param res: папка назначения (если None — используется текущая рабочая директория)
+    :return: функция ничего не возвращает
+    """
+    try:
+        c: Container = get_container(ctx)
+        c.console_service.untar(path_arch, res)
+
+        if res:
+            typer.echo(f"untar: распаковано в {res}")
+        else:
+            typer.echo(f"untar: распаковано в {Path('.').resolve()}")
+    except OSError as e:
+        typer.echo(e)
+    except Exception as e:
+        raise e
+
+
+@app.command()
+def grep(ctx: Context, pattern: str = typer.Argument(..., help="Шаблон для поиска (регулярное выражение)"), path: Path = typer.Argument('.', help="Каталог или файл для поиска"), r: bool = typer.Option(False, '-р', '--recursive', help="Рекурсивный поиск в подкаталогах"), ignore_case: bool = typer.Option(False, '-і', '--ignore-case', help="Поиск без учёта регистра")) -> None:
+    """
+    Функция вызывает команду grep и проверяет на ошибку
+    :param ctx: контекст Typer для доступа к контейнеру зависимостей
+    :param pattern: регулярное выражение для поиска
+    :param path: файл или каталог, в котором вести поиск
+    :param r: True/False (рекурсивно обходить подкаталоги, если указан каталог/нет
+    :param ignore_case: True/False (искать без учёта регистра/нет)
+    :return: функция ничего не возвращает
+    """
+    try:
+        c: Container = get_container(ctx)
+        res = c.console_service.grep(pattern, path, r=r, ignore_case=ignore_case)
+        for i in res:
+            typer.echo(i)
+    except Exception as e:
+        typer.echo(e)
+
 
 if __name__ == "__main__":
-    # Запуск Typer приложения при прямом выполнении модуля
-    # app() - вызов приложения, которое обработает аргументы командной строки
-    # __name__ == "__main__" - проверка, что файл запущен напрямую, а не импортирован
     app()

@@ -1,13 +1,1 @@
-[project]
-name = "console-app-with-logging"
-version = "0.1.0"
-description = "Add your description here"
-requires-python = ">=3.13"
-dependencies = [
-    "ruff>=0.14.2",
-    "typer>=0.20.0",
-]
-
-[tool.mypy]
-python_executable = "C:/Users/Asus/AppData/Local/Programs/Python/Python314/python.exe"  # полный путь к Python 3.14
-python_version = "3.14"
+kfkfkffk
