@@ -64,14 +64,14 @@ class WindowsConsoleService(OSConsoleServiceBase):
         path = Path(path)
 
         if not path.exists():
-            self._logger.error(f"Директория не найдена: {path}")
+            self._logger.error(f"ls: Директория не найдена: {path}")
             raise FileNotFoundError(path)
 
         if not path.is_dir():
-            self._logger.error(f"Введенное {path} не является директорией")
+            self._logger.error(f"ls: Введенное {path} не является директорией")
             raise NotADirectoryError(path)
 
-        self._logger.info(f"Отображение {path} в режиме {mode}")
+        self._logger.info(f"ls: Отображение {path} в режиме {mode}")
 
         a = list(path.iterdir())
 
@@ -89,7 +89,7 @@ class WindowsConsoleService(OSConsoleServiceBase):
 
     def cat(self, path_file: PathLike[str] | str, mode: FileReadMode = FileReadMode.string)->str | bytes:
         """
-        Функция для читает и отображает содержимое файла и обрабатывает возможные ошибки
+        Функция отображает содержимое файла и обрабатывает возможные ошибки
         :param path_file: путь к файлу
         :param mode: режим чтения файла (FileReadMode.string или FileReadMode.bytes)
         :return: содержимое файла в виде строки или байтов
@@ -132,14 +132,14 @@ class WindowsConsoleService(OSConsoleServiceBase):
         :return: абсолютный путь к новой рабочей директории
         """
         current_dir = Path(os.getcwd())
-        self._logger.info(f"cd:Попытка изменить каталог на '{path}'")
-        path = str(path)
+        self._logger.info(f"cd: Попытка изменить каталог на '{path}'")
+        path_str = str(path)
 
-        if path == "~" or path.startswith("~/"):
-            path_str =os.path.expanduser(path)
+        if path_str == "~" or path_str.startswith("~/"):
+            path_str = os.path.expanduser(path_str)
             self._logger.debug(f"cd: Путь преобразован до '{path_str}'")
 
-        path = Path(path)
+        path = Path(path_str)
 
         if not path.is_absolute():
             path = current_dir/path
@@ -149,12 +149,12 @@ class WindowsConsoleService(OSConsoleServiceBase):
         self._logger.debug(f"cd: Расширенный путь  '{path}'")
 
         if not path.exists():
-            err = f"cd: Директория не найдена: '{path}'"
+            err = f"cd: Директория не найдена: '{path_str}' (resolved to '{path}')"
             self._logger.error(err)
             raise FileNotFoundError(err)
 
         if not path.is_dir():
-            err = f"cd: Путь не является директорией: '{path}'"
+            err = f"cd: Путь не является директорией: '{path_str}' (resolved to '{path}')"
             self._logger.error(err)
             raise NotADirectoryError(err)
 
@@ -262,7 +262,7 @@ class WindowsConsoleService(OSConsoleServiceBase):
             self._logger.info(f"mv: Успешное перемещение в '{final_dst}'")
 
         except PermissionError as e:
-            self._logger.exception(f"mv:Запрещено перемещение'{src_path}' -> '{dst_path}': {e}")
+            self._logger.exception(f"mv: Запрещено перемещение '{src_path}' -> '{dst_path}': {e}")
             raise
 
         except OSError as e:
@@ -321,9 +321,9 @@ class WindowsConsoleService(OSConsoleServiceBase):
 
     def zip(self, path: PathLike[str] | str, path_arch: PathLike[str] | str) -> None:
         """
-        Функция создаёт zip‑архив из указанного каталога средствами стандартной библиотеки и обрабатывает возможные ошибки
+        Функция создаёт zip-архив из указанного каталога средствами стандартной библиотеки и обрабатывает возможные ошибки
         :param path: путь к каталогу (источнику) для упаковки
-        :param path_arch: путь к итоговому zip‑файлу
+        :param path_arch: путь к итоговому zip-файлу
         :return: функция ничего не возвращает
         """
         src_dir = Path(path)
@@ -357,8 +357,8 @@ class WindowsConsoleService(OSConsoleServiceBase):
 
     def unzip(self, path_arch: PathLike[str] | str, res: PathLike[str] | str | None = None) -> None:
         """
-        Функция распаковывает zip‑архив в указанную директорию и обрабатывает возможные ошибки
-        :param path_arch: путь к zip‑архиву
+        Функция распаковывает zip-архив в указанную директорию и обрабатывает возможные ошибки
+        :param path_arch: путь к zip-архиву
         :param res: папка назначения; если None — используется текущая рабочая директория
         :return: функция ничего не возвращает
         """

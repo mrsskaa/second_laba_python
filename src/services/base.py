@@ -111,32 +111,25 @@ class OSConsoleServiceBase(ABC):
 
         :param target: Путь к удаляемому объекту
         :param recursive: Рекурсивное удаление каталогов (-r/-г)
-        :raises FileNotFoundError: Если путь не существует
-        :raises IsADirectoryError: Если удаляем каталог без recursive=True
-        :raises PermissionError: Если недостаточно прав
-        :raises OSError: Прочие ошибки файловой системы
         """
         ...
 
     @abstractmethod
     def zip(self, path: PathLike[str] | str, path_arch: PathLike[str] | str) -> None:
         """
-        Абстрактный метод для создания ZIP‑архива из каталога.
+        Абстрактный метод для создания zip-архива из каталога.
 
-        :param path: Путь к каталогу‑источнику для упаковки
-        :param path_arch: Путь к результирующему ZIP‑файлу
-        :raises FileNotFoundError: Если каталог‑источник не существует
-        :raises NotADirectoryError: Если источник не является каталогом
-        :raises OSError: Прочие ошибки файловой системы
+        :param path: Путь к каталогу-источнику для упаковки
+        :param path_arch: Путь к результирующему ZIP-файлу
         """
         ...
 
     @abstractmethod
     def unzip(self, path_arch: PathLike[str] | str, res: PathLike[str] | str | None = None) -> None:
         """
-        Абстрактный метод для распаковки ZIP‑архива.
+        Абстрактный метод для распаковки ZIP-архива.
 
-        :param path_arch: Путь к ZIP‑архиву
+        :param path_arch: Путь к ZIP-архиву
         :param res: Папка назначения; если None — используется текущая рабочая директория
         :raises FileNotFoundError: Если архив не существует
         :raises OSError: Прочие ошибки файловой системы

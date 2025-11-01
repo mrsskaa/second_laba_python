@@ -1,4 +1,3 @@
-from src.errorss import NotInitContainer
 from src.config import LOGGING_CONFIG
 import logging.config
 import sys
@@ -21,7 +20,7 @@ def get_container(ctx: Context)->Container:
     container = ctx.obj
 
     if not isinstance(container, Container):
-        raise (NotInitContainer("Контейнер не инициализирован"))
+        raise RuntimeError("Контейнер не инициализирован")
 
     return container
 
@@ -157,8 +156,11 @@ def rm(ctx: Context, path: Path = typer.Argument(..., help="Путь к удал
     :return: функция ничего не возвращает
     """
     try:
+        c: Container = get_container(ctx)
+
         if path.is_dir() and not r:
             typer.echo(f"Ошибка: {path} — это директория. Укажите -r для рекурсивного удаления.")
+            return
 
         if path.is_dir() and r:
             answer = typer.prompt("Вы уверены, что хотите удалить каталог рекурсивно? (да/нет)")
@@ -169,6 +171,8 @@ def rm(ctx: Context, path: Path = typer.Argument(..., help="Путь к удал
         if not path.exists():
             typer.echo(f"Файл или каталог не найден: {path}")
             return
+
+        c.console_service.rm(path, recursive=r)
 
     except OSError as e:
         typer.echo(e)
@@ -198,7 +202,7 @@ def zip(ctx: Context, path: Path = typer.Argument(..., help="Каталог дл
 @app.command()
 def unzip(ctx: Context, path_arch: Path = typer.Argument(..., help="ZIP архив для распаковки"), res: Path = typer.Argument(None, help="Папка назначения (по умолчанию текущая)", show_default=False)) -> None:
     """
-    Функция вызывает команду unzip, которая распаковывает zip‑архив в указанную директорию (или текущую, если не задано) и обрабатывает ошибки
+    Функция вызывает команду unzip, которая распаковывает zip-архив в указанную директорию (или текущую, если не задано) и обрабатывает ошибки
     :param ctx: Контекст Typer для доступа к контейнеру зависимостей
     :param path_arch: путь к zip-файлу
     :param res: папка назначения (если None — используется текущая рабочая директория)

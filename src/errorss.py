@@ -1,2 +1,0 @@
-class NotInitContainer(Exception):
-    pass
